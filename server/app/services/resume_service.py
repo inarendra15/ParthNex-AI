@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.resume import Resume
 from app.repositories.resume_repository import ResumeRepository
+from app.services.vector_service import VectorService
 
 
 UPLOAD_DIR = "uploads/resumes"
@@ -33,13 +34,10 @@ class ResumeService:
         if extension not in ResumeService.ALLOWED_TYPES:
             raise HTTPException(
                 status_code=400,
-                detail="Only PDF, DOC and DOCX are allowed."
+                detail="Only PDF, DOC and DOCX files are allowed."
             )
 
-        unique_name = (
-            str(uuid.uuid4())
-            + extension
-        )
+        unique_name = f"{uuid.uuid4()}{extension}"
 
         os.makedirs(
             UPLOAD_DIR,
@@ -51,12 +49,14 @@ class ResumeService:
             unique_name
         )
 
+        # Save uploaded file
         with open(path, "wb") as buffer:
             shutil.copyfileobj(
                 file.file,
                 buffer
             )
 
+        # Create Resume object
         resume = Resume(
             filename=file.filename,
             stored_filename=unique_name,
@@ -65,10 +65,35 @@ class ResumeService:
             user_id=user_id
         )
 
-        return ResumeRepository.create(
+        # Save metadata to PostgreSQL
+        resume = ResumeRepository.create(
             db,
             resume
         )
+
+        # ===============================
+        # Automatically index into FAISS
+        # ===============================
+        try:
+            VectorService.index_resume(
+                resume.id,
+                resume.file_path
+            )
+            print(
+                f"✅ Resume {resume.id} indexed successfully."
+            )
+
+        except Exception as e:
+
+            print(
+                f"❌ Vector indexing failed: {e}"
+            )
+
+            # Future enhancement:
+            # Save indexing status in database
+            # Retry indexing using Celery/BackgroundTasks
+
+        return resume
 
     @staticmethod
     def list_resumes(
@@ -86,13 +111,14 @@ class ResumeService:
         resume_id: int,
         user_id: int
     ):
+
         resume = (
             db.query(Resume)
-        .filter(
-            Resume.id == resume_id,
-            Resume.user_id == user_id
+            .filter(
+                Resume.id == resume_id,
+                Resume.user_id == user_id
             )
-        .first()
+            .first()
         )
 
         if not resume:
@@ -101,13 +127,16 @@ class ResumeService:
                 detail="Resume not found"
             )
 
+        # Delete physical file
         if os.path.exists(resume.file_path):
             os.remove(resume.file_path)
 
+        # Delete from database
         ResumeRepository.delete(
             db,
             resume
         )
+
         return {
-        "message": "Resume deleted successfully"
+            "message": "Resume deleted successfully"
         }
