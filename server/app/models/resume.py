@@ -5,7 +5,7 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import DateTime
 from sqlalchemy.sql import func
 
-from app.database.base import Base
+from app.database.session import Base
 
 
 class Resume(Base):
