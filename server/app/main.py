@@ -5,6 +5,8 @@ from app.database.session import engine
 
 from app.api.v1.router import api_router
 
+from app.api.v1.ats import router as ats_router
+
 app = FastAPI(
     title="ParthNex AI",
     description="Intelligent Resume Screening & Recruitment Platform",
@@ -32,3 +34,5 @@ async def health():
         "status": "healthy",
         "service": "ParthNex AI Backend",
     }
+
+app.include_router(ats_router)
