@@ -5,7 +5,17 @@ import faiss
 import numpy as np
 
 
-# Project root = ParthNex-AI
+# ---------------------------------------------------
+# Project Structure
+#
+# ParthNex-AI/
+# ├── ai_engine/
+# │     └── data/
+# │            resume.index
+# │            resume_ids.pkl
+# └── server/
+# ---------------------------------------------------
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DATA_DIR = PROJECT_ROOT / "data"
@@ -21,19 +31,28 @@ class ResumeVectorStore:
         self.resume_ids = []
 
     def add(self, resume_id, embedding):
-        vector = np.array([embedding], dtype="float32")
+        vector = np.array([embedding], dtype=np.float32)
         self.index.add(vector)
         self.resume_ids.append(resume_id)
 
     def search(self, embedding, top_k=5):
-        vector = np.array([embedding], dtype="float32")
+
+        if self.index.ntotal == 0:
+            print("⚠️ FAISS index is empty.")
+            return []
+
+        vector = np.array([embedding], dtype=np.float32)
 
         distances, indices = self.index.search(vector, top_k)
 
         results = []
 
         for distance, idx in zip(distances[0], indices[0]):
+
             if idx == -1:
+                continue
+
+            if idx >= len(self.resume_ids):
                 continue
 
             results.append(
@@ -46,25 +65,58 @@ class ResumeVectorStore:
         return results
 
     def save(self):
+
         DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-        faiss.write_index(self.index, str(INDEX_FILE))
+        print("\n========== SAVING FAISS ==========")
+        print("Directory :", DATA_DIR)
+        print("Index File:", INDEX_FILE)
+        print("IDs File  :", IDS_FILE)
+        print("Vectors   :", self.index.ntotal)
+        print("Resume IDs:", self.resume_ids)
+
+        faiss.write_index(
+            self.index,
+            str(INDEX_FILE)
+        )
 
         with open(IDS_FILE, "wb") as f:
-            pickle.dump(self.resume_ids, f)
+            pickle.dump(
+                self.resume_ids,
+                f
+            )
+
+        print("✅ FAISS Saved Successfully\n")
 
     @classmethod
     def load(cls):
 
+        DATA_DIR.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
         if not INDEX_FILE.exists():
+
+            print("⚠️ No existing FAISS index found.")
+            print("Creating a new index...\n")
+
             return cls()
 
         store = cls()
 
-        store.index = faiss.read_index(str(INDEX_FILE))
+        store.index = faiss.read_index(
+            str(INDEX_FILE)
+        )
 
         if IDS_FILE.exists():
+
             with open(IDS_FILE, "rb") as f:
                 store.resume_ids = pickle.load(f)
+
+        print("\n========== LOADED FAISS ==========")
+        print("Vectors   :", store.index.ntotal)
+        print("Resume IDs:", store.resume_ids)
+        print("==================================\n")
 
         return store
