@@ -1,7 +1,19 @@
-from fastapi import APIRouter, Depends
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.database.dependencies import get_db
+
+from app.dependencies.auth import (
+    get_current_user,
+    require_recruiter,
+)
+
+from app.models.user import User
 
 from app.schemas.application_schema import (
     ApplicationCreate,
@@ -21,6 +33,8 @@ router = APIRouter(
 
 # ======================================================
 # CREATE APPLICATION
+# Candidate: only for self
+# Recruiter: allowed
 # ======================================================
 
 @router.post(
@@ -31,7 +45,22 @@ router = APIRouter(
 def create_application(
     data: ApplicationCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+
+    # Candidate cannot create an application
+    # on behalf of another candidate.
+    if (
+        current_user.role == "candidate"
+        and data.candidate_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only create "
+                "their own applications"
+            ),
+        )
 
     return ApplicationService.create_application(
         db=db,
@@ -41,6 +70,7 @@ def create_application(
 
 # ======================================================
 # LIST ALL APPLICATIONS
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -49,6 +79,7 @@ def create_application(
 )
 def list_applications(
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return ApplicationService.list_applications(
@@ -58,6 +89,7 @@ def list_applications(
 
 # ======================================================
 # LIST APPLICATIONS FOR A JOB
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -67,6 +99,7 @@ def list_applications(
 def list_job_applications(
     job_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return ApplicationService.list_job_applications(
@@ -77,6 +110,8 @@ def list_job_applications(
 
 # ======================================================
 # LIST APPLICATIONS FOR A CANDIDATE
+# Candidate: own applications only
+# Recruiter: any candidate
 # ======================================================
 
 @router.get(
@@ -86,7 +121,20 @@ def list_job_applications(
 def list_candidate_applications(
     candidate_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+
+    if (
+        current_user.role == "candidate"
+        and candidate_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only view "
+                "their own applications"
+            ),
+        )
 
     return ApplicationService.list_candidate_applications(
         db=db,
@@ -96,6 +144,8 @@ def list_candidate_applications(
 
 # ======================================================
 # GET SINGLE APPLICATION
+# Candidate: own application only
+# Recruiter: any application
 # ======================================================
 
 @router.get(
@@ -105,16 +155,32 @@ def list_candidate_applications(
 def get_application(
     application_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
-    return ApplicationService.get_application(
+    application = ApplicationService.get_application(
         db=db,
         application_id=application_id,
     )
 
+    if (
+        current_user.role == "candidate"
+        and application.candidate_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only view "
+                "their own applications"
+            ),
+        )
+
+    return application
+
 
 # ======================================================
 # UPDATE RECRUITMENT STATUS
+# Recruiter only
 # ======================================================
 
 @router.patch(
@@ -125,6 +191,7 @@ def update_application_status(
     application_id: int,
     data: ApplicationStatusUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return ApplicationService.update_status(
@@ -136,6 +203,7 @@ def update_application_status(
 
 # ======================================================
 # UPDATE AI SCORES
+# Recruiter only
 # ======================================================
 
 @router.patch(
@@ -146,6 +214,7 @@ def update_application_scores(
     application_id: int,
     data: ApplicationScoreUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return ApplicationService.update_scores(
@@ -157,6 +226,8 @@ def update_application_scores(
 
 # ======================================================
 # DELETE APPLICATION
+# Candidate: own application only
+# Recruiter: any application
 # ======================================================
 
 @router.delete(
@@ -165,7 +236,25 @@ def update_application_scores(
 def delete_application(
     application_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+
+    application = ApplicationService.get_application(
+        db=db,
+        application_id=application_id,
+    )
+
+    if (
+        current_user.role == "candidate"
+        and application.candidate_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only delete "
+                "their own applications"
+            ),
+        )
 
     return ApplicationService.delete_application(
         db=db,

@@ -1,7 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+)
 from sqlalchemy.orm import Session
 
 from app.database.dependencies import get_db
+
+from app.dependencies.auth import require_recruiter
+
+from app.models.user import User
 
 from app.schemas.dashboard_schema import (
     DashboardSummaryResponse,
@@ -23,6 +32,7 @@ router = APIRouter(
 
 # ======================================================
 # DASHBOARD SUMMARY
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -31,6 +41,7 @@ router = APIRouter(
 )
 def get_dashboard_summary(
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return DashboardService.get_summary(
@@ -40,6 +51,7 @@ def get_dashboard_summary(
 
 # ======================================================
 # JOB-WISE DASHBOARD OVERVIEW
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -48,14 +60,17 @@ def get_dashboard_summary(
 )
 def get_jobs_overview(
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return DashboardService.get_jobs_overview(
         db=db
     )
 
+
 # ======================================================
 # TOP CANDIDATES FOR JOB
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -72,6 +87,7 @@ def get_top_candidates(
     ),
 
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     result = DashboardService.get_top_candidates(
@@ -81,7 +97,6 @@ def get_top_candidates(
     )
 
     if result is None:
-
         raise HTTPException(
             status_code=404,
             detail="Job not found"
@@ -92,6 +107,7 @@ def get_top_candidates(
 
 # ======================================================
 # PER-JOB ANALYTICS
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -101,6 +117,7 @@ def get_top_candidates(
 def get_job_analytics(
     job_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     result = DashboardService.get_job_analytics(
@@ -109,7 +126,6 @@ def get_job_analytics(
     )
 
     if result is None:
-
         raise HTTPException(
             status_code=404,
             detail="Job not found"

@@ -10,6 +10,13 @@ from sqlalchemy.orm import Session
 
 from app.database.dependencies import get_db
 
+from app.dependencies.auth import (
+    get_current_user,
+    require_recruiter,
+)
+
+from app.models.user import User
+
 from app.schemas.interview_schema import (
     InterviewCreate,
     InterviewFeedbackUpdate,
@@ -31,6 +38,7 @@ router = APIRouter(
 
 # ======================================================
 # CREATE / SCHEDULE INTERVIEW
+# Recruiter only
 # ======================================================
 
 @router.post(
@@ -41,6 +49,7 @@ router = APIRouter(
 def create_interview(
     data: InterviewCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     interview = (
@@ -82,6 +91,7 @@ def create_interview(
 
 # ======================================================
 # GET ALL INTERVIEWS
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -99,6 +109,7 @@ def get_interviews(
         le=100,
     ),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return InterviewService.get_interviews(
@@ -110,6 +121,8 @@ def get_interviews(
 
 # ======================================================
 # GET INTERVIEWS BY APPLICATION
+# Candidate: own application only
+# Recruiter: any application
 # ======================================================
 
 @router.get(
@@ -119,6 +132,7 @@ def get_interviews(
 def get_application_interviews(
     application_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
     interviews = (
@@ -134,11 +148,39 @@ def get_application_interviews(
             detail="Application not found",
         )
 
+    if current_user.role == "candidate":
+
+        # Even when an application currently has no
+        # interviews, ownership must still be checked.
+        from app.models.application import Application
+
+        application = (
+            db.query(Application)
+            .filter(
+                Application.id == application_id
+            )
+            .first()
+        )
+
+        if (
+            application is None
+            or application.candidate_id
+            != current_user.id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Candidates can only view "
+                    "their own interviews"
+                ),
+            )
+
     return interviews
 
 
 # ======================================================
 # GET INTERVIEWS BY JOB
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -148,6 +190,7 @@ def get_application_interviews(
 def get_job_interviews(
     job_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return InterviewService.get_job_interviews(
@@ -158,6 +201,8 @@ def get_job_interviews(
 
 # ======================================================
 # GET INTERVIEW BY ID
+# Candidate: own interview only
+# Recruiter: any interview
 # ======================================================
 
 @router.get(
@@ -167,6 +212,7 @@ def get_job_interviews(
 def get_interview(
     interview_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
     interview = (
@@ -182,11 +228,25 @@ def get_interview(
             detail="Interview not found",
         )
 
+    if (
+        current_user.role == "candidate"
+        and interview.candidate_id
+        != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only view "
+                "their own interviews"
+            ),
+        )
+
     return interview
 
 
 # ======================================================
 # UPDATE INTERVIEW DETAILS
+# Recruiter only
 # ======================================================
 
 @router.patch(
@@ -197,6 +257,7 @@ def update_interview(
     interview_id: int,
     data: InterviewUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     interview = (
@@ -235,6 +296,7 @@ def update_interview(
 
 # ======================================================
 # UPDATE INTERVIEW STATUS
+# Recruiter only
 # ======================================================
 
 @router.patch(
@@ -245,6 +307,7 @@ def update_interview_status(
     interview_id: int,
     data: InterviewStatusUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     interview = (
@@ -266,6 +329,7 @@ def update_interview_status(
 
 # ======================================================
 # ADD / UPDATE INTERVIEW FEEDBACK
+# Recruiter only
 # ======================================================
 
 @router.patch(
@@ -276,6 +340,7 @@ def update_interview_feedback(
     interview_id: int,
     data: InterviewFeedbackUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     interview = (
@@ -297,6 +362,7 @@ def update_interview_feedback(
 
 # ======================================================
 # DELETE INTERVIEW
+# Recruiter only
 # ======================================================
 
 @router.delete(
@@ -305,6 +371,7 @@ def update_interview_feedback(
 def delete_interview(
     interview_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     deleted = (

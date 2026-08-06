@@ -3,10 +3,17 @@ from sqlalchemy.orm import Session
 
 from app.database.dependencies import get_db
 
+from app.dependencies.auth import (
+    get_current_user,
+    require_recruiter,
+)
+
+from app.models.user import User
+
 from app.schemas.job_schema import (
     JobCreate,
     JobUpdate,
-    JobResponse
+    JobResponse,
 )
 
 from app.services.job_service import JobService
@@ -19,18 +26,19 @@ from app.services.job_matching_service import JobMatchingService
 
 router = APIRouter(
     prefix="/jobs",
-    tags=["Jobs"]
+    tags=["Jobs"],
 )
 
 
 # ======================================================
 # TEST JOB MATCHING
-# Existing AI job matching endpoint
+# Recruiter only
 # ======================================================
 
 @router.post("/test-match")
 def test_match(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     job = """
@@ -47,100 +55,110 @@ def test_match(
     return JobMatchingService.match_candidates(
         db=db,
         job_description=job,
-        top_k=5
+        top_k=5,
     )
 
 
 # ======================================================
 # CREATE JOB
+# Recruiter only
 # ======================================================
 
 @router.post(
     "",
     response_model=JobResponse,
-    status_code=201
+    status_code=201,
 )
 def create_job(
     data: JobCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return JobService.create_job(
         db=db,
-        data=data
+        data=data,
     )
 
 
 # ======================================================
 # LIST ALL JOBS
+# Any authenticated active user
 # ======================================================
 
 @router.get(
     "",
-    response_model=list[JobResponse]
+    response_model=list[JobResponse],
 )
 def list_jobs(
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
     return JobService.list_jobs(
-        db=db
+        db=db,
     )
 
 
 # ======================================================
 # GET SINGLE JOB
+# Any authenticated active user
 # ======================================================
 
 @router.get(
     "/{job_id}",
-    response_model=JobResponse
+    response_model=JobResponse,
 )
 def get_job(
     job_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
     return JobService.get_job(
         db=db,
-        job_id=job_id
+        job_id=job_id,
     )
 
 
 # ======================================================
 # UPDATE JOB
+# Recruiter only
 # ======================================================
 
 @router.patch(
     "/{job_id}",
-    response_model=JobResponse
+    response_model=JobResponse,
 )
 def update_job(
     job_id: int,
     data: JobUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return JobService.update_job(
         db=db,
         job_id=job_id,
-        data=data
+        data=data,
     )
 
 
 # ======================================================
 # DELETE JOB
+# Recruiter only
 # ======================================================
 
 @router.delete(
-    "/{job_id}"
+    "/{job_id}",
 )
 def delete_job(
     job_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return JobService.delete_job(
         db=db,
-        job_id=job_id
+        job_id=job_id,
     )

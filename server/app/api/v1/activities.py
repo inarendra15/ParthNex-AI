@@ -8,13 +8,21 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from app.database.dependencies import get_db
+
+from app.dependencies.auth import (
+    get_current_user,
+    require_recruiter,
+)
+
 from app.models.application import Application
 from app.models.job import Job
 from app.models.user import User
+
 from app.schemas.activity_schema import (
     ActivityListResponse,
     ActivityResponse,
 )
+
 from app.services.activity_service import ActivityService
 
 
@@ -26,6 +34,7 @@ router = APIRouter(
 
 # ======================================================
 # LIST RECENT ACTIVITIES
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -39,6 +48,7 @@ def list_activities(
         le=100,
     ),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     activities = ActivityService.list_activities(
@@ -58,6 +68,8 @@ def list_activities(
 
 # ======================================================
 # APPLICATION TIMELINE
+# Candidate: own application only
+# Recruiter: any application
 # ======================================================
 
 @router.get(
@@ -67,6 +79,7 @@ def list_activities(
 def get_application_timeline(
     application_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
     application = (
@@ -81,6 +94,19 @@ def get_application_timeline(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Application not found",
+        )
+
+    if (
+        current_user.role == "candidate"
+        and application.candidate_id
+        != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only view "
+                "their own application activity"
+            ),
         )
 
     activities = (
@@ -98,6 +124,7 @@ def get_application_timeline(
 
 # ======================================================
 # JOB ACTIVITY FEED
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -112,6 +139,7 @@ def get_job_activities(
         le=100,
     ),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     job = (
@@ -144,6 +172,8 @@ def get_job_activities(
 
 # ======================================================
 # CANDIDATE ACTIVITY FEED
+# Candidate: own activities only
+# Recruiter: any candidate
 # ======================================================
 
 @router.get(
@@ -158,6 +188,7 @@ def get_candidate_activities(
         le=100,
     ),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
     candidate = (
@@ -172,6 +203,18 @@ def get_candidate_activities(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Candidate not found",
+        )
+
+    if (
+        current_user.role == "candidate"
+        and candidate_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only view "
+                "their own activities"
+            ),
         )
 
     activities = (
@@ -190,6 +233,8 @@ def get_candidate_activities(
 
 # ======================================================
 # GET ACTIVITY BY ID
+# Candidate: own activity only
+# Recruiter: any activity
 # ======================================================
 
 @router.get(
@@ -199,6 +244,7 @@ def get_candidate_activities(
 def get_activity(
     activity_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
     activity = ActivityService.get_activity(
@@ -211,5 +257,20 @@ def get_activity(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Activity not found",
         )
+
+    if current_user.role == "candidate":
+
+        if (
+            activity.candidate_id is None
+            or activity.candidate_id
+            != current_user.id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Candidates can only view "
+                    "their own activities"
+                ),
+            )
 
     return activity

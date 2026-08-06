@@ -1,13 +1,20 @@
 from fastapi import (
     APIRouter,
     Depends,
-    Query,
+    HTTPException,
     status,
 )
 
 from sqlalchemy.orm import Session
 
 from app.database.dependencies import get_db
+
+from app.dependencies.auth import (
+    get_current_user,
+    require_recruiter,
+)
+
+from app.models.user import User
 
 from app.schemas.offer_schema import (
     OfferCreate,
@@ -27,6 +34,7 @@ router = APIRouter(
 
 # ======================================================
 # CREATE OFFER
+# Recruiter only
 # ======================================================
 
 @router.post(
@@ -37,6 +45,7 @@ router = APIRouter(
 def create_offer(
     data: OfferCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return OfferService.create_offer(
@@ -47,6 +56,7 @@ def create_offer(
 
 # ======================================================
 # LIST ALL OFFERS
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -55,6 +65,7 @@ def create_offer(
 )
 def list_offers(
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return OfferService.list_offers(
@@ -64,6 +75,8 @@ def list_offers(
 
 # ======================================================
 # GET OFFER BY APPLICATION
+# Candidate: own application only
+# Recruiter: any application
 # ======================================================
 
 @router.get(
@@ -73,16 +86,32 @@ def list_offers(
 def get_application_offer(
     application_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
-    return OfferService.get_application_offer(
+    offer = OfferService.get_application_offer(
         db=db,
         application_id=application_id,
     )
 
+    if (
+        current_user.role == "candidate"
+        and offer.candidate_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only view "
+                "their own offers"
+            ),
+        )
+
+    return offer
+
 
 # ======================================================
 # GET OFFERS BY JOB
+# Recruiter only
 # ======================================================
 
 @router.get(
@@ -92,6 +121,7 @@ def get_application_offer(
 def get_job_offers(
     job_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return OfferService.list_job_offers(
@@ -102,6 +132,8 @@ def get_job_offers(
 
 # ======================================================
 # GET OFFERS BY CANDIDATE
+# Candidate: own offers only
+# Recruiter: any candidate
 # ======================================================
 
 @router.get(
@@ -111,7 +143,20 @@ def get_job_offers(
 def get_candidate_offers(
     candidate_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+
+    if (
+        current_user.role == "candidate"
+        and candidate_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only view "
+                "their own offers"
+            ),
+        )
 
     return OfferService.list_candidate_offers(
         db=db,
@@ -121,6 +166,8 @@ def get_candidate_offers(
 
 # ======================================================
 # GET OFFER BY ID
+# Candidate: own offer only
+# Recruiter: any offer
 # ======================================================
 
 @router.get(
@@ -130,16 +177,32 @@ def get_candidate_offers(
 def get_offer(
     offer_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
 
-    return OfferService.get_offer(
+    offer = OfferService.get_offer(
         db=db,
         offer_id=offer_id,
     )
 
+    if (
+        current_user.role == "candidate"
+        and offer.candidate_id != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Candidates can only view "
+                "their own offers"
+            ),
+        )
+
+    return offer
+
 
 # ======================================================
 # UPDATE OFFER DETAILS
+# Recruiter only
 # ======================================================
 
 @router.patch(
@@ -150,6 +213,7 @@ def update_offer(
     offer_id: int,
     data: OfferUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return OfferService.update_offer(
@@ -161,6 +225,7 @@ def update_offer(
 
 # ======================================================
 # UPDATE OFFER STATUS
+# Recruiter only
 # ======================================================
 
 @router.patch(
@@ -171,6 +236,7 @@ def update_offer_status(
     offer_id: int,
     data: OfferStatusUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return OfferService.update_status(
@@ -182,6 +248,7 @@ def update_offer_status(
 
 # ======================================================
 # DELETE OFFER
+# Recruiter only
 # ======================================================
 
 @router.delete(
@@ -190,6 +257,7 @@ def update_offer_status(
 def delete_offer(
     offer_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_recruiter),
 ):
 
     return OfferService.delete_offer(
