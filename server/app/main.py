@@ -9,6 +9,7 @@ from app.api.v1.ats import router as ats_router
 from app.api.v1.ranking import router as ranking_router
 
 from app.api.v1.applications import router as applications_router
+from app.api.v1.dashboard import router as dashboard_router
 
 
 
@@ -43,3 +44,4 @@ async def health():
 app.include_router(ats_router)
 app.include_router(ranking_router)
 app.include_router(applications_router)
+app.include_router(dashboard_router)
