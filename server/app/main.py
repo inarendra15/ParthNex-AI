@@ -11,6 +11,7 @@ from app.api.v1.ranking import router as ranking_router
 from app.api.v1.applications import router as applications_router
 from app.api.v1.dashboard import router as dashboard_router
 
+from app.api.v1.interviews import router as interviews_router
 
 
 app = FastAPI(
@@ -45,3 +46,4 @@ app.include_router(ats_router)
 app.include_router(ranking_router)
 app.include_router(applications_router)
 app.include_router(dashboard_router)
+app.include_router(interviews_router)

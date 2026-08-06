@@ -69,17 +69,54 @@ class ConversionRateMetrics(BaseModel):
 
 
 # ======================================================
+# INTERVIEW METRICS
+# ======================================================
+
+class InterviewMetrics(BaseModel):
+    total: int
+    scheduled: int
+    completed: int
+    cancelled: int
+    rescheduled: int
+    no_show: int
+
+
+# ======================================================
+# INTERVIEW EVALUATION METRICS
+# ======================================================
+
+class InterviewEvaluationMetrics(BaseModel):
+    average_rating: float
+
+    strong_hire: int
+    hire: int
+    consider: int
+    no_hire: int
+
+
+# ======================================================
 # DASHBOARD SUMMARY RESPONSE
 # ======================================================
 
 class DashboardSummaryResponse(BaseModel):
     jobs: JobMetrics
+
     candidates: CandidateMetrics
+
     resumes: ResumeMetrics
+
     applications: ApplicationMetrics
+
     pipeline: PipelineMetrics
+
     average_scores: AverageScoreMetrics
+
     conversion_rates: ConversionRateMetrics
+
+    interviews: InterviewMetrics
+
+    interview_evaluation: InterviewEvaluationMetrics
+
 
 # ======================================================
 # JOB INFORMATION
@@ -89,8 +126,11 @@ class DashboardJobInfo(BaseModel):
     id: int
     title: str
     company: str
+
     location: str | None = None
+
     employment_type: str | None = None
+
     status: str
 
 
@@ -111,10 +151,19 @@ class JobConversionRateMetrics(BaseModel):
 
 class JobAnalyticsResponse(BaseModel):
     job: DashboardJobInfo
+
     applications: ApplicationMetrics
+
     pipeline: PipelineMetrics
+
     average_scores: AverageScoreMetrics
+
     conversion_rates: JobConversionRateMetrics
+
+    interviews: InterviewMetrics
+
+    interview_evaluation: InterviewEvaluationMetrics
+
 
 # ======================================================
 # TOP CANDIDATE
@@ -135,6 +184,7 @@ class TopCandidateResponse(BaseModel):
     skill_score: float | None = None
 
     ai_shortlisted: bool
+
     status: str
 
 
@@ -145,9 +195,11 @@ class TopCandidateResponse(BaseModel):
 class TopCandidatesResponse(BaseModel):
     job_id: int
     job_title: str
+
     total_returned: int
 
     candidates: list[TopCandidateResponse]
+
 
 # ======================================================
 # JOB OVERVIEW ITEM
@@ -155,18 +207,38 @@ class TopCandidatesResponse(BaseModel):
 
 class JobOverviewResponse(BaseModel):
     job_id: int
+
     title: str
     company: str
     status: str
 
+    # --------------------------------------------------
+    # Application Analytics
+    # --------------------------------------------------
+
     total_applications: int
+
     ai_shortlisted: int
 
     interview: int
+
     selected: int
+
     rejected: int
 
     average_ranking_score: float
+
+    # --------------------------------------------------
+    # Interview Analytics
+    # --------------------------------------------------
+
+    total_interviews: int
+
+    scheduled_interviews: int
+
+    completed_interviews: int
+
+    average_interview_rating: float
 
 
 # ======================================================

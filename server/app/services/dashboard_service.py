@@ -2,6 +2,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.application import Application
+from app.models.interview import Interview
 from app.models.job import Job
 from app.models.resume import Resume
 from app.models.user import User
@@ -160,9 +161,6 @@ class DashboardService:
 
         # ----------------------------------------------
         # AI Shortlisted Count
-        #
-        # AI shortlist state is intentionally separate
-        # from the recruitment pipeline status.
         # ----------------------------------------------
 
         ai_shortlisted = (
@@ -252,6 +250,141 @@ class DashboardService:
             )
 
         # ----------------------------------------------
+        # Interview Counts
+        # ----------------------------------------------
+
+        total_interviews = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .scalar()
+            or 0
+        )
+
+        scheduled_interviews = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.status == "scheduled"
+            )
+            .scalar()
+            or 0
+        )
+
+        completed_interviews = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.status == "completed"
+            )
+            .scalar()
+            or 0
+        )
+
+        cancelled_interviews = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.status == "cancelled"
+            )
+            .scalar()
+            or 0
+        )
+
+        rescheduled_interviews = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.status == "rescheduled"
+            )
+            .scalar()
+            or 0
+        )
+
+        no_show_interviews = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.status == "no_show"
+            )
+            .scalar()
+            or 0
+        )
+
+        # ----------------------------------------------
+        # Interview Average Rating
+        # ----------------------------------------------
+
+        average_interview_rating = (
+            db.query(
+                func.avg(
+                    Interview.rating
+                )
+            )
+            .filter(
+                Interview.rating.isnot(None)
+            )
+            .scalar()
+        )
+
+        # ----------------------------------------------
+        # Interview Recommendations
+        # ----------------------------------------------
+
+        strong_hire = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.recommendation
+                == "strong_hire"
+            )
+            .scalar()
+            or 0
+        )
+
+        hire = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.recommendation
+                == "hire"
+            )
+            .scalar()
+            or 0
+        )
+
+        consider = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.recommendation
+                == "consider"
+            )
+            .scalar()
+            or 0
+        )
+
+        no_hire = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.recommendation
+                == "no_hire"
+            )
+            .scalar()
+            or 0
+        )
+
+        # ----------------------------------------------
         # Final Summary Response
         # ----------------------------------------------
 
@@ -320,6 +453,64 @@ class DashboardService:
 
                 "selection_rate": (
                     selection_rate
+                )
+            },
+
+            # ------------------------------------------
+            # Phase 12 Interview Analytics
+            # ------------------------------------------
+
+            "interviews": {
+
+                "total": (
+                    total_interviews
+                ),
+
+                "scheduled": (
+                    scheduled_interviews
+                ),
+
+                "completed": (
+                    completed_interviews
+                ),
+
+                "cancelled": (
+                    cancelled_interviews
+                ),
+
+                "rescheduled": (
+                    rescheduled_interviews
+                ),
+
+                "no_show": (
+                    no_show_interviews
+                )
+            },
+
+            "interview_evaluation": {
+
+                "average_rating": round(
+                    float(
+                        average_interview_rating
+                        or 0
+                    ),
+                    2
+                ),
+
+                "strong_hire": (
+                    strong_hire
+                ),
+
+                "hire": (
+                    hire
+                ),
+
+                "consider": (
+                    consider
+                ),
+
+                "no_hire": (
+                    no_hire
                 )
             }
         }
@@ -527,6 +718,129 @@ class DashboardService:
             )
 
         # ----------------------------------------------
+        # Per-Job Interview Counts
+        # ----------------------------------------------
+
+        total_interviews = (
+            db.query(
+                func.count(Interview.id)
+            )
+            .filter(
+                Interview.job_id == job_id
+            )
+            .scalar()
+            or 0
+        )
+
+        def interview_status_count(
+            status: str
+        ):
+
+            return (
+                db.query(
+                    func.count(Interview.id)
+                )
+                .filter(
+                    Interview.job_id == job_id,
+                    Interview.status == status
+                )
+                .scalar()
+                or 0
+            )
+
+        scheduled_interviews = (
+            interview_status_count(
+                "scheduled"
+            )
+        )
+
+        completed_interviews = (
+            interview_status_count(
+                "completed"
+            )
+        )
+
+        cancelled_interviews = (
+            interview_status_count(
+                "cancelled"
+            )
+        )
+
+        rescheduled_interviews = (
+            interview_status_count(
+                "rescheduled"
+            )
+        )
+
+        no_show_interviews = (
+            interview_status_count(
+                "no_show"
+            )
+        )
+
+        # ----------------------------------------------
+        # Per-Job Average Interview Rating
+        # ----------------------------------------------
+
+        average_interview_rating = (
+            db.query(
+                func.avg(
+                    Interview.rating
+                )
+            )
+            .filter(
+                Interview.job_id == job_id,
+                Interview.rating.isnot(None)
+            )
+            .scalar()
+        )
+
+        # ----------------------------------------------
+        # Per-Job Recommendation Helper
+        # ----------------------------------------------
+
+        def recommendation_count(
+            recommendation: str
+        ):
+
+            return (
+                db.query(
+                    func.count(Interview.id)
+                )
+                .filter(
+                    Interview.job_id == job_id,
+                    Interview.recommendation
+                    == recommendation
+                )
+                .scalar()
+                or 0
+            )
+
+        strong_hire = (
+            recommendation_count(
+                "strong_hire"
+            )
+        )
+
+        hire = (
+            recommendation_count(
+                "hire"
+            )
+        )
+
+        consider = (
+            recommendation_count(
+                "consider"
+            )
+        )
+
+        no_hire = (
+            recommendation_count(
+                "no_hire"
+            )
+        )
+
+        # ----------------------------------------------
         # Final Per-Job Response
         # ----------------------------------------------
 
@@ -619,6 +933,64 @@ class DashboardService:
                 "rejection_rate": (
                     rejection_rate
                 )
+            },
+
+            # ------------------------------------------
+            # Phase 12 Interview Analytics
+            # ------------------------------------------
+
+            "interviews": {
+
+                "total": (
+                    total_interviews
+                ),
+
+                "scheduled": (
+                    scheduled_interviews
+                ),
+
+                "completed": (
+                    completed_interviews
+                ),
+
+                "cancelled": (
+                    cancelled_interviews
+                ),
+
+                "rescheduled": (
+                    rescheduled_interviews
+                ),
+
+                "no_show": (
+                    no_show_interviews
+                )
+            },
+
+            "interview_evaluation": {
+
+                "average_rating": round(
+                    float(
+                        average_interview_rating
+                        or 0
+                    ),
+                    2
+                ),
+
+                "strong_hire": (
+                    strong_hire
+                ),
+
+                "hire": (
+                    hire
+                ),
+
+                "consider": (
+                    consider
+                ),
+
+                "no_hire": (
+                    no_hire
+                )
             }
         }
 
@@ -650,9 +1022,6 @@ class DashboardService:
 
         # ----------------------------------------------
         # Validate Limit
-        #
-        # This also protects the service if it is called
-        # directly outside the FastAPI endpoint.
         # ----------------------------------------------
 
         limit = max(
@@ -665,12 +1034,6 @@ class DashboardService:
 
         # ----------------------------------------------
         # Query Persisted Candidate Rankings
-        #
-        # Application.candidate_id -> User.id
-        # Application.resume_id    -> Resume.id
-        #
-        # No embedding generation, FAISS search or
-        # resume parsing is needed here.
         # ----------------------------------------------
 
         results = (
@@ -874,6 +1237,45 @@ class DashboardService:
             )
 
             # ------------------------------------------
+            # Interview Statistics
+            # ------------------------------------------
+
+            total_interviews = (
+                db.query(
+                    func.count(Interview.id)
+                )
+                .filter(
+                    Interview.job_id == job.id
+                )
+                .scalar()
+                or 0
+            )
+
+            scheduled_interviews = (
+                db.query(
+                    func.count(Interview.id)
+                )
+                .filter(
+                    Interview.job_id == job.id,
+                    Interview.status == "scheduled"
+                )
+                .scalar()
+                or 0
+            )
+
+            completed_interviews = (
+                db.query(
+                    func.count(Interview.id)
+                )
+                .filter(
+                    Interview.job_id == job.id,
+                    Interview.status == "completed"
+                )
+                .scalar()
+                or 0
+            )
+
+            # ------------------------------------------
             # Average Ranking Score
             # ------------------------------------------
 
@@ -886,6 +1288,23 @@ class DashboardService:
                 .filter(
                     Application.job_id == job.id,
                     Application.ranking_score.isnot(None)
+                )
+                .scalar()
+            )
+
+            # ------------------------------------------
+            # Average Interview Rating
+            # ------------------------------------------
+
+            average_interview_rating = (
+                db.query(
+                    func.avg(
+                        Interview.rating
+                    )
+                )
+                .filter(
+                    Interview.job_id == job.id,
+                    Interview.rating.isnot(None)
                 )
                 .scalar()
             )
@@ -918,6 +1337,30 @@ class DashboardService:
                     "average_ranking_score": round(
                         float(
                             average_ranking_score
+                            or 0
+                        ),
+                        2
+                    ),
+
+                    # ----------------------------------
+                    # Phase 12 Interview Analytics
+                    # ----------------------------------
+
+                    "total_interviews": (
+                        total_interviews
+                    ),
+
+                    "scheduled_interviews": (
+                        scheduled_interviews
+                    ),
+
+                    "completed_interviews": (
+                        completed_interviews
+                    ),
+
+                    "average_interview_rating": round(
+                        float(
+                            average_interview_rating
                             or 0
                         ),
                         2
