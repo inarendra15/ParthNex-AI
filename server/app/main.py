@@ -8,6 +8,8 @@ from app.api.v1.router import api_router
 from app.api.v1.ats import router as ats_router
 from app.api.v1.ranking import router as ranking_router
 
+from app.api.v1.applications import router as applications_router
+
 
 
 app = FastAPI(
@@ -40,3 +42,4 @@ async def health():
 
 app.include_router(ats_router)
 app.include_router(ranking_router)
+app.include_router(applications_router)

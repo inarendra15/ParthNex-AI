@@ -15,10 +15,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 # ======================================================
-# DATABASE MODEL
+# DATABASE MODELS
 # ======================================================
 
 from app.models.resume import Resume
+from app.models.application import Application
 
 
 # ======================================================
@@ -49,7 +50,8 @@ class RankingService:
         db: Session,
         job_description: str,
         top_k: int = 10,
-        shortlist_threshold: float = 65.0
+        shortlist_threshold: float = 65.0,
+        job_id: int | None = None
     ):
 
         # ==================================================
@@ -89,15 +91,18 @@ class RankingService:
             # ----------------------------------------------
 
             try:
+
                 resume_text = ResumeParser.parse(
                     resume.file_path
                 )
 
             except Exception as e:
+
                 print(
                     f"Ranking parse failed for "
                     f"resume {resume.id}: {e}"
                 )
+
                 continue
 
             # ----------------------------------------------
@@ -131,7 +136,7 @@ class RankingService:
             )
 
             # ----------------------------------------------
-            # Add Phase 7 scores
+            # Add Phase 7 Scores
             # ----------------------------------------------
 
             enriched_candidate = (
@@ -140,7 +145,9 @@ class RankingService:
 
             enriched_candidate[
                 "section_score"
-            ] = section_result["section_score"]
+            ] = section_result[
+                "section_score"
+            ]
 
             enriched_candidate[
                 "experience_score"
@@ -150,7 +157,9 @@ class RankingService:
 
             enriched_candidate[
                 "quality_score"
-            ] = quality_result["quality_score"]
+            ] = quality_result[
+                "quality_score"
+            ]
 
             enriched_candidates.append(
                 enriched_candidate
@@ -160,44 +169,57 @@ class RankingService:
         # 3. MULTI-FACTOR RANKING
         # ==================================================
 
-        ranked_candidates = CandidateRanker.rank(
-            enriched_candidates
+        ranked_candidates = (
+            CandidateRanker.rank(
+                enriched_candidates
+            )
         )
 
         # ==================================================
-        # 3.1 DEDUPLICATE CANDIDATES
-        # Keep only the highest-ranked resume per candidate
+        # 4. DEDUPLICATE CANDIDATES
+        #
+        # Keep only the highest-ranked resume
+        # for each candidate.
         # ==================================================
 
         unique_candidates = []
+
         seen_candidate_ids = set()
 
         for candidate in ranked_candidates:
 
-            candidate_id = candidate["candidate_id"]
+            candidate_id = (
+                candidate["candidate_id"]
+            )
 
             if candidate_id in seen_candidate_ids:
                 continue
 
-            seen_candidate_ids.add(candidate_id)
+            seen_candidate_ids.add(
+                candidate_id
+            )
 
             unique_candidates.append(
                 candidate
             )
 
-
+        # ----------------------------------------------
         # Reassign ranks after deduplication
+        # ----------------------------------------------
+
         for index, candidate in enumerate(
             unique_candidates,
             start=1
         ):
+
             candidate["rank"] = index
 
-
-        ranked_candidates = unique_candidates
+        ranked_candidates = (
+            unique_candidates
+        )
 
         # ==================================================
-        # 4. AUTOMATIC SHORTLISTING
+        # 5. AUTOMATIC SHORTLISTING
         # ==================================================
 
         shortlist_result = (
@@ -208,55 +230,195 @@ class RankingService:
         )
 
         # ==================================================
-        # 5. FINAL RESPONSE
+        # 6. PERSIST AI RESULTS INTO APPLICATIONS
+        #
+        # This runs only when a stored job_id is supplied.
+        #
+        # Manual /ranking/candidates calls will continue
+        # working without changing application records.
+        # ==================================================
+
+        if job_id is not None:
+
+            # ----------------------------------------------
+            # Candidate IDs shortlisted by AI
+            # ----------------------------------------------
+
+            shortlisted_candidate_ids = {
+                candidate["candidate_id"]
+                for candidate
+                in shortlist_result["shortlisted"]
+            }
+
+            # ----------------------------------------------
+            # Update corresponding applications
+            # ----------------------------------------------
+
+            for candidate in ranked_candidates:
+
+                candidate_id = (
+                    candidate["candidate_id"]
+                )
+
+                application = (
+                    db.query(Application)
+                    .filter(
+                        Application.job_id
+                        == job_id,
+
+                        Application.candidate_id
+                        == candidate_id
+                    )
+                    .first()
+                )
+
+                # Candidate can exist in FAISS but may
+                # not have applied for this particular job.
+                if application is None:
+                    continue
+
+                # ------------------------------------------
+                # Determine shortlist decision
+                # ------------------------------------------
+
+                is_shortlisted = (
+                    candidate_id
+                    in shortlisted_candidate_ids
+                )
+
+                # ------------------------------------------
+                # Persist AI Scores
+                # ------------------------------------------
+
+                application.ranking_score = (
+                    candidate["ranking_score"]
+                )
+
+                application.semantic_score = (
+                    candidate["semantic_score"]
+                )
+
+                application.skill_score = (
+                    candidate["skill_score"]
+                )
+
+                application.shortlisted = (
+                    is_shortlisted
+                )
+
+                # ------------------------------------------
+                # Automatic Pipeline Status
+                # ------------------------------------------
+                #
+                # AI is allowed to modify only early
+                # recruitment stages.
+                #
+                # Recruiter/final decisions such as
+                # interview, selected and rejected must
+                # never be overwritten by reranking.
+                # ------------------------------------------
+
+                if application.status in {
+                    "applied",
+                    "screened",
+                    "shortlisted"
+                }:
+
+                    if is_shortlisted:
+
+                        application.status = (
+                            "shortlisted"
+                        )
+
+                    else:
+
+                        application.status = (
+                            "screened"
+                        )
+
+            # ----------------------------------------------
+            # Commit all application updates together
+            # ----------------------------------------------
+
+            db.commit()
+
+        # ==================================================
+        # 7. FINAL RESPONSE
         # ==================================================
 
         return {
-            "job_description": job_description,
+
+            "job_description": (
+                job_description
+            ),
 
             "top_k": top_k,
 
             "ranking_weights": {
+
                 "semantic": (
-                    CandidateRanker.SEMANTIC_WEIGHT
+                    CandidateRanker
+                    .SEMANTIC_WEIGHT
                 ),
+
                 "skills": (
-                    CandidateRanker.SKILL_WEIGHT
+                    CandidateRanker
+                    .SKILL_WEIGHT
                 ),
+
                 "experience": (
-                    CandidateRanker.EXPERIENCE_WEIGHT
+                    CandidateRanker
+                    .EXPERIENCE_WEIGHT
                 ),
+
                 "quality": (
-                    CandidateRanker.QUALITY_WEIGHT
+                    CandidateRanker
+                    .QUALITY_WEIGHT
                 ),
+
                 "sections": (
-                    CandidateRanker.SECTION_WEIGHT
+                    CandidateRanker
+                    .SECTION_WEIGHT
                 )
             },
 
-            "threshold": shortlist_result[
-                "threshold"
-            ],
+            "threshold": (
+                shortlist_result[
+                    "threshold"
+                ]
+            ),
 
-            "total_candidates": shortlist_result[
-                "total_candidates"
-            ],
+            "total_candidates": (
+                shortlist_result[
+                    "total_candidates"
+                ]
+            ),
 
-            "shortlisted_count": shortlist_result[
-                "shortlisted_count"
-            ],
+            "shortlisted_count": (
+                shortlist_result[
+                    "shortlisted_count"
+                ]
+            ),
 
-            "not_shortlisted_count": shortlist_result[
-                "not_shortlisted_count"
-            ],
+            "not_shortlisted_count": (
+                shortlist_result[
+                    "not_shortlisted_count"
+                ]
+            ),
 
-            "ranked_candidates": ranked_candidates,
+            "ranked_candidates": (
+                ranked_candidates
+            ),
 
-            "shortlisted": shortlist_result[
-                "shortlisted"
-            ],
+            "shortlisted": (
+                shortlist_result[
+                    "shortlisted"
+                ]
+            ),
 
-            "not_shortlisted": shortlist_result[
-                "not_shortlisted"
-            ]
+            "not_shortlisted": (
+                shortlist_result[
+                    "not_shortlisted"
+                ]
+            )
         }
