@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.models.application import Application
 from app.models.interview import Interview
 from app.models.job import Job
+from app.models.offer import Offer
 from app.models.resume import Resume
 from app.models.user import User
 
@@ -31,26 +32,20 @@ class DashboardService:
 
         open_jobs = (
             db.query(func.count(Job.id))
-            .filter(
-                Job.status == "open"
-            )
+            .filter(Job.status == "open")
             .scalar()
             or 0
         )
 
         closed_jobs = (
             db.query(func.count(Job.id))
-            .filter(
-                Job.status == "closed"
-            )
+            .filter(Job.status == "closed")
             .scalar()
             or 0
         )
 
         # ----------------------------------------------
         # Candidate Count
-        #
-        # Count unique candidates who have applications.
         # ----------------------------------------------
 
         total_candidates = (
@@ -90,73 +85,51 @@ class DashboardService:
         )
 
         # ----------------------------------------------
-        # Recruitment Pipeline Counts
+        # Application Status Helper
         # ----------------------------------------------
 
-        applied = (
-            db.query(
-                func.count(Application.id)
+        def application_status_count(
+            application_status: str
+        ):
+
+            return (
+                db.query(
+                    func.count(Application.id)
+                )
+                .filter(
+                    Application.status
+                    == application_status
+                )
+                .scalar()
+                or 0
             )
-            .filter(
-                Application.status == "applied"
-            )
-            .scalar()
-            or 0
+
+        # ----------------------------------------------
+        # Recruitment Pipeline
+        # ----------------------------------------------
+
+        applied = application_status_count(
+            "applied"
         )
 
-        screened = (
-            db.query(
-                func.count(Application.id)
-            )
-            .filter(
-                Application.status == "screened"
-            )
-            .scalar()
-            or 0
+        screened = application_status_count(
+            "screened"
         )
 
-        shortlisted = (
-            db.query(
-                func.count(Application.id)
-            )
-            .filter(
-                Application.status == "shortlisted"
-            )
-            .scalar()
-            or 0
+        shortlisted = application_status_count(
+            "shortlisted"
         )
 
-        interview = (
-            db.query(
-                func.count(Application.id)
-            )
-            .filter(
-                Application.status == "interview"
-            )
-            .scalar()
-            or 0
+        interview = application_status_count(
+            "interview"
         )
 
-        selected = (
-            db.query(
-                func.count(Application.id)
-            )
-            .filter(
-                Application.status == "selected"
-            )
-            .scalar()
-            or 0
+        selected = application_status_count(
+            "selected"
         )
 
-        rejected = (
-            db.query(
-                func.count(Application.id)
-            )
-            .filter(
-                Application.status == "rejected"
-            )
-            .scalar()
-            or 0
+        rejected = application_status_count(
+            "rejected"
         )
 
         # ----------------------------------------------
@@ -175,7 +148,7 @@ class DashboardService:
         )
 
         # ----------------------------------------------
-        # Average Ranking Score
+        # Average AI Scores
         # ----------------------------------------------
 
         average_ranking_score = (
@@ -190,10 +163,6 @@ class DashboardService:
             .scalar()
         )
 
-        # ----------------------------------------------
-        # Average Semantic Score
-        # ----------------------------------------------
-
         average_semantic_score = (
             db.query(
                 func.avg(
@@ -205,10 +174,6 @@ class DashboardService:
             )
             .scalar()
         )
-
-        # ----------------------------------------------
-        # Average Skill Score
-        # ----------------------------------------------
 
         average_skill_score = (
             db.query(
@@ -223,7 +188,7 @@ class DashboardService:
         )
 
         # ----------------------------------------------
-        # Conversion Rates
+        # Application Conversion Rates
         # ----------------------------------------------
 
         ai_shortlist_rate = 0.0
@@ -249,9 +214,9 @@ class DashboardService:
                 2
             )
 
-        # ----------------------------------------------
-        # Interview Counts
-        # ----------------------------------------------
+        # ==============================================
+        # PHASE 12 — INTERVIEW ANALYTICS
+        # ==============================================
 
         total_interviews = (
             db.query(
@@ -261,63 +226,54 @@ class DashboardService:
             or 0
         )
 
+        def interview_status_count(
+            interview_status: str
+        ):
+
+            return (
+                db.query(
+                    func.count(Interview.id)
+                )
+                .filter(
+                    Interview.status
+                    == interview_status
+                )
+                .scalar()
+                or 0
+            )
+
         scheduled_interviews = (
-            db.query(
-                func.count(Interview.id)
+            interview_status_count(
+                "scheduled"
             )
-            .filter(
-                Interview.status == "scheduled"
-            )
-            .scalar()
-            or 0
         )
 
         completed_interviews = (
-            db.query(
-                func.count(Interview.id)
+            interview_status_count(
+                "completed"
             )
-            .filter(
-                Interview.status == "completed"
-            )
-            .scalar()
-            or 0
         )
 
         cancelled_interviews = (
-            db.query(
-                func.count(Interview.id)
+            interview_status_count(
+                "cancelled"
             )
-            .filter(
-                Interview.status == "cancelled"
-            )
-            .scalar()
-            or 0
         )
 
         rescheduled_interviews = (
-            db.query(
-                func.count(Interview.id)
+            interview_status_count(
+                "rescheduled"
             )
-            .filter(
-                Interview.status == "rescheduled"
-            )
-            .scalar()
-            or 0
         )
 
         no_show_interviews = (
-            db.query(
-                func.count(Interview.id)
+            interview_status_count(
+                "no_show"
             )
-            .filter(
-                Interview.status == "no_show"
-            )
-            .scalar()
-            or 0
         )
 
         # ----------------------------------------------
-        # Interview Average Rating
+        # Average Interview Rating
         # ----------------------------------------------
 
         average_interview_rating = (
@@ -333,60 +289,137 @@ class DashboardService:
         )
 
         # ----------------------------------------------
-        # Interview Recommendations
+        # Interview Recommendation Helper
         # ----------------------------------------------
 
-        strong_hire = (
-            db.query(
-                func.count(Interview.id)
+        def recommendation_count(
+            recommendation: str
+        ):
+
+            return (
+                db.query(
+                    func.count(Interview.id)
+                )
+                .filter(
+                    Interview.recommendation
+                    == recommendation
+                )
+                .scalar()
+                or 0
             )
-            .filter(
-                Interview.recommendation
-                == "strong_hire"
+
+        strong_hire = recommendation_count(
+            "strong_hire"
+        )
+
+        hire = recommendation_count(
+            "hire"
+        )
+
+        consider = recommendation_count(
+            "consider"
+        )
+
+        no_hire = recommendation_count(
+            "no_hire"
+        )
+
+        # ==============================================
+        # PHASE 13 — OFFER ANALYTICS
+        # ==============================================
+
+        total_offers = (
+            db.query(
+                func.count(Offer.id)
             )
             .scalar()
             or 0
         )
 
-        hire = (
-            db.query(
-                func.count(Interview.id)
+        def offer_status_count(
+            offer_status: str
+        ):
+
+            return (
+                db.query(
+                    func.count(Offer.id)
+                )
+                .filter(
+                    Offer.status == offer_status
+                )
+                .scalar()
+                or 0
             )
-            .filter(
-                Interview.recommendation
-                == "hire"
-            )
-            .scalar()
-            or 0
+
+        draft_offers = offer_status_count(
+            "draft"
         )
 
-        consider = (
-            db.query(
-                func.count(Interview.id)
-            )
-            .filter(
-                Interview.recommendation
-                == "consider"
-            )
-            .scalar()
-            or 0
+        sent_offers = offer_status_count(
+            "sent"
         )
 
-        no_hire = (
-            db.query(
-                func.count(Interview.id)
-            )
-            .filter(
-                Interview.recommendation
-                == "no_hire"
-            )
-            .scalar()
-            or 0
+        accepted_offers = offer_status_count(
+            "accepted"
+        )
+
+        rejected_offers = offer_status_count(
+            "rejected"
+        )
+
+        withdrawn_offers = offer_status_count(
+            "withdrawn"
+        )
+
+        expired_offers = offer_status_count(
+            "expired"
         )
 
         # ----------------------------------------------
-        # Final Summary Response
+        # Offer Conversion Rates
         # ----------------------------------------------
+
+        offer_acceptance_rate = 0.0
+        offer_rejection_rate = 0.0
+        offer_pending_rate = 0.0
+
+        if total_offers > 0:
+
+            offer_acceptance_rate = round(
+                (
+                    accepted_offers
+                    / total_offers
+                )
+                * 100,
+                2
+            )
+
+            offer_rejection_rate = round(
+                (
+                    rejected_offers
+                    / total_offers
+                )
+                * 100,
+                2
+            )
+
+            pending_offers = (
+                draft_offers
+                + sent_offers
+            )
+
+            offer_pending_rate = round(
+                (
+                    pending_offers
+                    / total_offers
+                )
+                * 100,
+                2
+            )
+
+        # ==============================================
+        # FINAL SUMMARY RESPONSE
+        # ==============================================
 
         return {
 
@@ -512,6 +545,56 @@ class DashboardService:
                 "no_hire": (
                     no_hire
                 )
+            },
+
+            # ------------------------------------------
+            # Phase 13 Offer Analytics
+            # ------------------------------------------
+
+            "offers": {
+
+                "total": (
+                    total_offers
+                ),
+
+                "draft": (
+                    draft_offers
+                ),
+
+                "sent": (
+                    sent_offers
+                ),
+
+                "accepted": (
+                    accepted_offers
+                ),
+
+                "rejected": (
+                    rejected_offers
+                ),
+
+                "withdrawn": (
+                    withdrawn_offers
+                ),
+
+                "expired": (
+                    expired_offers
+                )
+            },
+
+            "offer_conversion": {
+
+                "acceptance_rate": (
+                    offer_acceptance_rate
+                ),
+
+                "rejection_rate": (
+                    offer_rejection_rate
+                ),
+
+                "pending_rate": (
+                    offer_pending_rate
+                )
             }
         }
 
@@ -556,11 +639,11 @@ class DashboardService:
         )
 
         # ----------------------------------------------
-        # Helper Function for Pipeline Counts
+        # Application Status Helper
         # ----------------------------------------------
 
         def status_count(
-            status: str
+            application_status: str
         ):
 
             return (
@@ -569,7 +652,8 @@ class DashboardService:
                 )
                 .filter(
                     Application.job_id == job_id,
-                    Application.status == status
+                    Application.status
+                    == application_status
                 )
                 .scalar()
                 or 0
@@ -620,7 +704,7 @@ class DashboardService:
         )
 
         # ----------------------------------------------
-        # Average Ranking Score
+        # Average AI Scores
         # ----------------------------------------------
 
         average_ranking_score = (
@@ -636,10 +720,6 @@ class DashboardService:
             .scalar()
         )
 
-        # ----------------------------------------------
-        # Average Semantic Score
-        # ----------------------------------------------
-
         average_semantic_score = (
             db.query(
                 func.avg(
@@ -652,10 +732,6 @@ class DashboardService:
             )
             .scalar()
         )
-
-        # ----------------------------------------------
-        # Average Skill Score
-        # ----------------------------------------------
 
         average_skill_score = (
             db.query(
@@ -671,7 +747,7 @@ class DashboardService:
         )
 
         # ----------------------------------------------
-        # Conversion Rates
+        # Application Conversion Rates
         # ----------------------------------------------
 
         ai_shortlist_rate = 0.0
@@ -717,9 +793,9 @@ class DashboardService:
                 2
             )
 
-        # ----------------------------------------------
-        # Per-Job Interview Counts
-        # ----------------------------------------------
+        # ==============================================
+        # PHASE 12 — PER-JOB INTERVIEW ANALYTICS
+        # ==============================================
 
         total_interviews = (
             db.query(
@@ -733,7 +809,7 @@ class DashboardService:
         )
 
         def interview_status_count(
-            status: str
+            interview_status: str
         ):
 
             return (
@@ -742,7 +818,8 @@ class DashboardService:
                 )
                 .filter(
                     Interview.job_id == job_id,
-                    Interview.status == status
+                    Interview.status
+                    == interview_status
                 )
                 .scalar()
                 or 0
@@ -796,7 +873,7 @@ class DashboardService:
         )
 
         # ----------------------------------------------
-        # Per-Job Recommendation Helper
+        # Recommendation Helper
         # ----------------------------------------------
 
         def recommendation_count(
@@ -840,9 +917,118 @@ class DashboardService:
             )
         )
 
+        # ==============================================
+        # PHASE 13 — PER-JOB OFFER ANALYTICS
+        # ==============================================
+
+        total_offers = (
+            db.query(
+                func.count(Offer.id)
+            )
+            .filter(
+                Offer.job_id == job_id
+            )
+            .scalar()
+            or 0
+        )
+
+        def offer_status_count(
+            offer_status: str
+        ):
+
+            return (
+                db.query(
+                    func.count(Offer.id)
+                )
+                .filter(
+                    Offer.job_id == job_id,
+                    Offer.status == offer_status
+                )
+                .scalar()
+                or 0
+            )
+
+        draft_offers = (
+            offer_status_count(
+                "draft"
+            )
+        )
+
+        sent_offers = (
+            offer_status_count(
+                "sent"
+            )
+        )
+
+        accepted_offers = (
+            offer_status_count(
+                "accepted"
+            )
+        )
+
+        rejected_offers = (
+            offer_status_count(
+                "rejected"
+            )
+        )
+
+        withdrawn_offers = (
+            offer_status_count(
+                "withdrawn"
+            )
+        )
+
+        expired_offers = (
+            offer_status_count(
+                "expired"
+            )
+        )
+
         # ----------------------------------------------
-        # Final Per-Job Response
+        # Per-Job Offer Conversion Rates
         # ----------------------------------------------
+
+        offer_acceptance_rate = 0.0
+        offer_rejection_rate = 0.0
+        offer_pending_rate = 0.0
+
+        if total_offers > 0:
+
+            offer_acceptance_rate = round(
+                (
+                    accepted_offers
+                    / total_offers
+                )
+                * 100,
+                2
+            )
+
+            offer_rejection_rate = round(
+                (
+                    rejected_offers
+                    / total_offers
+                )
+                * 100,
+                2
+            )
+
+            pending_offers = (
+                draft_offers
+                + sent_offers
+            )
+
+            offer_pending_rate = round(
+                (
+                    pending_offers
+                    / total_offers
+                )
+                * 100,
+                2
+            )
+
+        # ==============================================
+        # FINAL PER-JOB RESPONSE
+        # ==============================================
 
         return {
 
@@ -991,6 +1177,56 @@ class DashboardService:
                 "no_hire": (
                     no_hire
                 )
+            },
+
+            # ------------------------------------------
+            # Phase 13 Offer Analytics
+            # ------------------------------------------
+
+            "offers": {
+
+                "total": (
+                    total_offers
+                ),
+
+                "draft": (
+                    draft_offers
+                ),
+
+                "sent": (
+                    sent_offers
+                ),
+
+                "accepted": (
+                    accepted_offers
+                ),
+
+                "rejected": (
+                    rejected_offers
+                ),
+
+                "withdrawn": (
+                    withdrawn_offers
+                ),
+
+                "expired": (
+                    expired_offers
+                )
+            },
+
+            "offer_conversion": {
+
+                "acceptance_rate": (
+                    offer_acceptance_rate
+                ),
+
+                "rejection_rate": (
+                    offer_rejection_rate
+                ),
+
+                "pending_rate": (
+                    offer_pending_rate
+                )
             }
         }
 
@@ -1128,10 +1364,6 @@ class DashboardService:
                 }
             )
 
-        # ----------------------------------------------
-        # Final Response
-        # ----------------------------------------------
-
         return {
 
             "job_id": (
@@ -1173,9 +1405,9 @@ class DashboardService:
 
         for job in jobs:
 
-            # ------------------------------------------
-            # Application Statistics
-            # ------------------------------------------
+            # ==========================================
+            # APPLICATION STATISTICS
+            # ==========================================
 
             total_applications = (
                 db.query(
@@ -1236,9 +1468,9 @@ class DashboardService:
                 or 0
             )
 
-            # ------------------------------------------
-            # Interview Statistics
-            # ------------------------------------------
+            # ==========================================
+            # INTERVIEW STATISTICS
+            # ==========================================
 
             total_interviews = (
                 db.query(
@@ -1309,16 +1541,104 @@ class DashboardService:
                 .scalar()
             )
 
-            # ------------------------------------------
-            # Add Job
-            # ------------------------------------------
+            # ==========================================
+            # PHASE 13 — OFFER STATISTICS
+            # ==========================================
+
+            total_offers = (
+                db.query(
+                    func.count(Offer.id)
+                )
+                .filter(
+                    Offer.job_id == job.id
+                )
+                .scalar()
+                or 0
+            )
+
+            def job_offer_status_count(
+                offer_status: str
+            ):
+
+                return (
+                    db.query(
+                        func.count(Offer.id)
+                    )
+                    .filter(
+                        Offer.job_id == job.id,
+                        Offer.status == offer_status
+                    )
+                    .scalar()
+                    or 0
+                )
+
+            draft_offers = (
+                job_offer_status_count(
+                    "draft"
+                )
+            )
+
+            sent_offers = (
+                job_offer_status_count(
+                    "sent"
+                )
+            )
+
+            accepted_offers = (
+                job_offer_status_count(
+                    "accepted"
+                )
+            )
+
+            rejected_offers = (
+                job_offer_status_count(
+                    "rejected"
+                )
+            )
+
+            withdrawn_offers = (
+                job_offer_status_count(
+                    "withdrawn"
+                )
+            )
+
+            expired_offers = (
+                job_offer_status_count(
+                    "expired"
+                )
+            )
+
+            offer_acceptance_rate = 0.0
+
+            if total_offers > 0:
+
+                offer_acceptance_rate = round(
+                    (
+                        accepted_offers
+                        / total_offers
+                    )
+                    * 100,
+                    2
+                )
+
+            # ==========================================
+            # ADD JOB TO OVERVIEW
+            # ==========================================
 
             overview.append(
                 {
+
                     "job_id": job.id,
+
                     "title": job.title,
+
                     "company": job.company,
+
                     "status": job.status,
+
+                    # ----------------------------------
+                    # Application Analytics
+                    # ----------------------------------
 
                     "total_applications": (
                         total_applications
@@ -1328,11 +1648,17 @@ class DashboardService:
                         ai_shortlisted
                     ),
 
-                    "interview": interview,
+                    "interview": (
+                        interview
+                    ),
 
-                    "selected": selected,
+                    "selected": (
+                        selected
+                    ),
 
-                    "rejected": rejected,
+                    "rejected": (
+                        rejected
+                    ),
 
                     "average_ranking_score": round(
                         float(
@@ -1364,6 +1690,42 @@ class DashboardService:
                             or 0
                         ),
                         2
+                    ),
+
+                    # ----------------------------------
+                    # Phase 13 Offer Analytics
+                    # ----------------------------------
+
+                    "total_offers": (
+                        total_offers
+                    ),
+
+                    "draft_offers": (
+                        draft_offers
+                    ),
+
+                    "sent_offers": (
+                        sent_offers
+                    ),
+
+                    "accepted_offers": (
+                        accepted_offers
+                    ),
+
+                    "rejected_offers": (
+                        rejected_offers
+                    ),
+
+                    "withdrawn_offers": (
+                        withdrawn_offers
+                    ),
+
+                    "expired_offers": (
+                        expired_offers
+                    ),
+
+                    "offer_acceptance_rate": (
+                        offer_acceptance_rate
                     )
                 }
             )

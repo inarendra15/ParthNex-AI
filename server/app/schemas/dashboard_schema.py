@@ -95,6 +95,31 @@ class InterviewEvaluationMetrics(BaseModel):
 
 
 # ======================================================
+# OFFER METRICS
+# ======================================================
+
+class OfferMetrics(BaseModel):
+    total: int
+
+    draft: int
+    sent: int
+    accepted: int
+    rejected: int
+    withdrawn: int
+    expired: int
+
+
+# ======================================================
+# OFFER CONVERSION METRICS
+# ======================================================
+
+class OfferConversionMetrics(BaseModel):
+    acceptance_rate: float
+    rejection_rate: float
+    pending_rate: float
+
+
+# ======================================================
 # DASHBOARD SUMMARY RESPONSE
 # ======================================================
 
@@ -116,6 +141,10 @@ class DashboardSummaryResponse(BaseModel):
     interviews: InterviewMetrics
 
     interview_evaluation: InterviewEvaluationMetrics
+
+    offers: OfferMetrics
+
+    offer_conversion: OfferConversionMetrics
 
 
 # ======================================================
@@ -163,6 +192,10 @@ class JobAnalyticsResponse(BaseModel):
     interviews: InterviewMetrics
 
     interview_evaluation: InterviewEvaluationMetrics
+
+    offers: OfferMetrics
+
+    offer_conversion: OfferConversionMetrics
 
 
 # ======================================================
@@ -239,6 +272,26 @@ class JobOverviewResponse(BaseModel):
     completed_interviews: int
 
     average_interview_rating: float
+
+    # --------------------------------------------------
+    # Offer Analytics
+    # --------------------------------------------------
+
+    total_offers: int
+
+    draft_offers: int
+
+    sent_offers: int
+
+    accepted_offers: int
+
+    rejected_offers: int
+
+    withdrawn_offers: int
+
+    expired_offers: int
+
+    offer_acceptance_rate: float
 
 
 # ======================================================
