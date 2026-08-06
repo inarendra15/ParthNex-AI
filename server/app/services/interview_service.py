@@ -1,3 +1,4 @@
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.application import Application
@@ -9,6 +10,8 @@ from app.schemas.interview_schema import (
     InterviewStatusUpdate,
     InterviewUpdate,
 )
+
+from app.services.activity_service import ActivityService
 
 
 class InterviewService:
@@ -60,10 +63,6 @@ class InterviewService:
 
         # ----------------------------------------------
         # Create Interview
-        #
-        # job_id and candidate_id are derived from the
-        # application instead of being trusted from
-        # client input.
         # ----------------------------------------------
 
         interview = Interview(
@@ -83,22 +82,110 @@ class InterviewService:
             status="scheduled",
         )
 
-        db.add(interview)
+        try:
 
-        # ----------------------------------------------
-        # Synchronize Application Pipeline
-        #
-        # Do not downgrade terminal states.
-        # ----------------------------------------------
+            db.add(interview)
 
-        if application.status not in {
-            "selected",
-            "rejected",
-        }:
-            application.status = "interview"
+            # Flush first so interview.id is available
+            # for the activity record.
+            db.flush()
 
-        db.commit()
-        db.refresh(interview)
+            # ------------------------------------------
+            # Synchronize Application Pipeline
+            # ------------------------------------------
+
+            old_application_status = (
+                application.status
+            )
+
+            application_status_changed = False
+
+            if application.status not in {
+                "selected",
+                "rejected",
+            }:
+
+                if application.status != "interview":
+
+                    application.status = "interview"
+
+                    application_status_changed = True
+
+            # ------------------------------------------
+            # Interview Scheduled Activity
+            # ------------------------------------------
+
+            ActivityService.log_activity(
+                db=db,
+                activity_type="interview_scheduled",
+                entity_type="interview",
+                entity_id=interview.id,
+                application_id=interview.application_id,
+                job_id=interview.job_id,
+                candidate_id=interview.candidate_id,
+                title="Interview scheduled",
+                description=(
+                    f"Interview round "
+                    f"{interview.round_number} "
+                    f"({interview.interview_type}) "
+                    f"was scheduled."
+                ),
+                old_status=None,
+                new_status="scheduled",
+                commit=False,
+            )
+
+            # ------------------------------------------
+            # Application Pipeline Activity
+            # ------------------------------------------
+            #
+            # Scheduling an interview can automatically
+            # move an application into the interview
+            # stage. Record that transition as well.
+            # ------------------------------------------
+
+            if application_status_changed:
+
+                ActivityService.log_activity(
+                    db=db,
+                    activity_type=(
+                        "application_status_changed"
+                    ),
+                    entity_type="application",
+                    entity_id=application.id,
+                    application_id=application.id,
+                    job_id=application.job_id,
+                    candidate_id=application.candidate_id,
+                    title="Application status changed",
+                    description=(
+                        "Application status changed "
+                        f"from {old_application_status} "
+                        "to interview after interview "
+                        "scheduling."
+                    ),
+                    old_status=old_application_status,
+                    new_status="interview",
+                    commit=False,
+                )
+
+            db.commit()
+            db.refresh(interview)
+
+        except IntegrityError:
+
+            db.rollback()
+
+            # The database unique constraint remains
+            # the final protection against race
+            # conditions.
+            return {
+                "error": "duplicate_round"
+            }
+
+        except Exception:
+
+            db.rollback()
+            raise
 
         return interview
 
@@ -224,6 +311,13 @@ class InterviewService:
         )
 
         # ----------------------------------------------
+        # No Fields Supplied
+        # ----------------------------------------------
+
+        if not update_data:
+            return interview
+
+        # ----------------------------------------------
         # Prevent Duplicate Round During Update
         # ----------------------------------------------
 
@@ -256,18 +350,72 @@ class InterviewService:
                 }
 
         # ----------------------------------------------
-        # Apply Updates
+        # Detect Real Changes
         # ----------------------------------------------
 
+        changed_fields = []
+
         for field, value in update_data.items():
-            setattr(
+
+            old_value = getattr(
                 interview,
-                field,
-                value
+                field
             )
 
-        db.commit()
-        db.refresh(interview)
+            if old_value != value:
+
+                setattr(
+                    interview,
+                    field,
+                    value
+                )
+
+                changed_fields.append(field)
+
+        # No-op update
+        if not changed_fields:
+            return interview
+
+        try:
+
+            # ------------------------------------------
+            # Interview Details Updated Activity
+            # ------------------------------------------
+
+            ActivityService.log_activity(
+                db=db,
+                activity_type=(
+                    "interview_details_updated"
+                ),
+                entity_type="interview",
+                entity_id=interview.id,
+                application_id=interview.application_id,
+                job_id=interview.job_id,
+                candidate_id=interview.candidate_id,
+                title="Interview details updated",
+                description=(
+                    "Updated interview fields: "
+                    + ", ".join(changed_fields)
+                    + "."
+                ),
+                commit=False,
+            )
+
+            db.commit()
+            db.refresh(interview)
+
+        except IntegrityError:
+
+            db.rollback()
+
+            return {
+                "error": "duplicate_round"
+            }
+
+        except Exception:
+
+            db.rollback()
+            raise
 
         return interview
 
@@ -292,10 +440,63 @@ class InterviewService:
         if interview is None:
             return None
 
-        interview.status = data.status
+        old_status = interview.status
+        new_status = data.status
 
-        db.commit()
-        db.refresh(interview)
+        # ----------------------------------------------
+        # No-op Status Update
+        # ----------------------------------------------
+
+        if old_status == new_status:
+            return interview
+
+        interview.status = new_status
+
+        # ----------------------------------------------
+        # Select Activity Type
+        # ----------------------------------------------
+
+        activity_type_map = {
+            "scheduled": "interview_scheduled",
+            "completed": "interview_completed",
+            "cancelled": "interview_cancelled",
+            "rescheduled": "interview_rescheduled",
+            "no_show": "interview_no_show",
+        }
+
+        activity_type = activity_type_map.get(
+            new_status,
+            "interview_status_changed",
+        )
+
+        try:
+
+            ActivityService.log_activity(
+                db=db,
+                activity_type=activity_type,
+                entity_type="interview",
+                entity_id=interview.id,
+                application_id=interview.application_id,
+                job_id=interview.job_id,
+                candidate_id=interview.candidate_id,
+                title="Interview status changed",
+                description=(
+                    f"Interview status changed "
+                    f"from {old_status} to "
+                    f"{new_status}."
+                ),
+                old_status=old_status,
+                new_status=new_status,
+                commit=False,
+            )
+
+            db.commit()
+            db.refresh(interview)
+
+        except Exception:
+
+            db.rollback()
+            raise
 
         return interview
 
@@ -320,18 +521,86 @@ class InterviewService:
         if interview is None:
             return None
 
+        # ----------------------------------------------
+        # Capture Existing State
+        # ----------------------------------------------
+
+        old_status = interview.status
+
+        old_rating = interview.rating
+        old_feedback = interview.feedback
+        old_recommendation = (
+            interview.recommendation
+        )
+
+        # ----------------------------------------------
+        # Detect Whether Anything Actually Changed
+        # ----------------------------------------------
+
+        feedback_changed = (
+            old_rating != data.rating
+            or old_feedback != data.feedback
+            or old_recommendation
+            != data.recommendation
+        )
+
+        status_changed = (
+            old_status != "completed"
+        )
+
+        if (
+            not feedback_changed
+            and not status_changed
+        ):
+            return interview
+
+        # ----------------------------------------------
+        # Apply Feedback
+        # ----------------------------------------------
+
         interview.rating = data.rating
         interview.feedback = data.feedback
         interview.recommendation = (
             data.recommendation
         )
 
-        # Feedback represents completion of the
-        # interview round.
+        # Feedback represents completion.
         interview.status = "completed"
 
-        db.commit()
-        db.refresh(interview)
+        try:
+
+            # ------------------------------------------
+            # Interview Evaluation Activity
+            # ------------------------------------------
+
+            ActivityService.log_activity(
+                db=db,
+                activity_type=(
+                    "interview_feedback_updated"
+                ),
+                entity_type="interview",
+                entity_id=interview.id,
+                application_id=interview.application_id,
+                job_id=interview.job_id,
+                candidate_id=interview.candidate_id,
+                title="Interview feedback updated",
+                description=(
+                    "Interview evaluation was "
+                    "recorded with recommendation "
+                    f"{data.recommendation}."
+                ),
+                old_status=old_status,
+                new_status="completed",
+                commit=False,
+            )
+
+            db.commit()
+            db.refresh(interview)
+
+        except Exception:
+
+            db.rollback()
+            raise
 
         return interview
 
@@ -355,7 +624,59 @@ class InterviewService:
         if interview is None:
             return False
 
-        db.delete(interview)
-        db.commit()
+        # ----------------------------------------------
+        # Preserve Historical Information
+        # ----------------------------------------------
+
+        deleted_interview_id = interview.id
+
+        application_id = (
+            interview.application_id
+        )
+
+        job_id = interview.job_id
+        candidate_id = interview.candidate_id
+
+        old_status = interview.status
+
+        round_number = interview.round_number
+
+        try:
+
+            # ------------------------------------------
+            # Audit Before Delete
+            # ------------------------------------------
+            #
+            # There is no direct interview_id FK in
+            # activities, so entity_id safely preserves
+            # the deleted interview's historical ID.
+            # ------------------------------------------
+
+            ActivityService.log_activity(
+                db=db,
+                activity_type="interview_deleted",
+                entity_type="interview",
+                entity_id=deleted_interview_id,
+                application_id=application_id,
+                job_id=job_id,
+                candidate_id=candidate_id,
+                title="Interview deleted",
+                description=(
+                    f"Interview round "
+                    f"{round_number} was deleted."
+                ),
+                old_status=old_status,
+                new_status=None,
+                commit=False,
+            )
+
+            db.delete(interview)
+
+            db.commit()
+
+        except Exception:
+
+            db.rollback()
+            raise
 
         return True

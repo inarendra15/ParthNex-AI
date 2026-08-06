@@ -14,6 +14,7 @@ from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.interviews import router as interviews_router
 from app.api.v1 import offers
 
+from app.api.v1 import activities
 
 app = FastAPI(
     title="ParthNex AI",
@@ -49,3 +50,4 @@ app.include_router(applications_router)
 app.include_router(dashboard_router)
 app.include_router(interviews_router)
 app.include_router(offers.router)
+app.include_router(activities.router)

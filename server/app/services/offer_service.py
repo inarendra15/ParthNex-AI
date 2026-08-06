@@ -11,6 +11,8 @@ from app.schemas.offer_schema import (
     OfferUpdate,
 )
 
+from app.services.activity_service import ActivityService
+
 
 class OfferService:
 
@@ -35,6 +37,18 @@ class OfferService:
         "rejected": set(),
         "withdrawn": set(),
         "expired": set(),
+    }
+
+    # ==================================================
+    # ACTIVITY TYPE MAPPING
+    # ==================================================
+
+    STATUS_ACTIVITY_TYPES = {
+        "sent": "offer_sent",
+        "accepted": "offer_accepted",
+        "rejected": "offer_rejected",
+        "withdrawn": "offer_withdrawn",
+        "expired": "offer_expired",
     }
 
     # ==================================================
@@ -103,9 +117,6 @@ class OfferService:
 
         # ----------------------------------------------
         # Create Offer
-        #
-        # job_id and candidate_id are derived from
-        # the trusted Application record.
         # ----------------------------------------------
 
         offer = Offer(
@@ -130,11 +141,41 @@ class OfferService:
         )
 
         try:
+
             db.add(offer)
+
+            # Get offer.id without committing.
+            db.flush()
+
+            # ------------------------------------------
+            # Audit Activity
+            # ------------------------------------------
+
+            ActivityService.log_activity(
+                db=db,
+                activity_type="offer_created",
+                entity_type="offer",
+                entity_id=offer.id,
+                application_id=offer.application_id,
+                job_id=offer.job_id,
+                candidate_id=offer.candidate_id,
+                title="Offer created",
+                description=(
+                    f"Offer for "
+                    f"{offer.offered_role} "
+                    f"was created."
+                ),
+                old_status=None,
+                new_status="draft",
+                commit=False,
+            )
+
+            # Offer + activity commit together.
             db.commit()
             db.refresh(offer)
 
         except IntegrityError:
+
             db.rollback()
 
             raise HTTPException(
@@ -144,6 +185,11 @@ class OfferService:
                     "this application"
                 ),
             )
+
+        except Exception:
+
+            db.rollback()
+            raise
 
         return offer
 
@@ -201,10 +247,6 @@ class OfferService:
         application_id: int,
     ):
 
-        # ----------------------------------------------
-        # Validate Application
-        # ----------------------------------------------
-
         application = (
             db.query(Application)
             .filter(
@@ -219,10 +261,6 @@ class OfferService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Application not found",
             )
-
-        # ----------------------------------------------
-        # Find Offer
-        # ----------------------------------------------
 
         offer = (
             db.query(Offer)
@@ -306,7 +344,7 @@ class OfferService:
         )
 
         # ----------------------------------------------
-        # Terminal offers cannot be edited
+        # Terminal Offers Cannot Be Edited
         # ----------------------------------------------
 
         if offer.status in {
@@ -326,11 +364,23 @@ class OfferService:
             exclude_unset=True
         )
 
+        if not update_data:
+            return offer
+
+        # ----------------------------------------------
+        # Normalize Currency Before Comparison
+        # ----------------------------------------------
+
+        if (
+            "currency" in update_data
+            and update_data["currency"] is not None
+        ):
+            update_data["currency"] = (
+                update_data["currency"].upper()
+            )
+
         # ----------------------------------------------
         # Calculate Effective Dates
-        #
-        # This validates partial PATCH requests against
-        # values already stored in the database.
         # ----------------------------------------------
 
         effective_joining_date = (
@@ -354,7 +404,9 @@ class OfferService:
             > effective_joining_date
         ):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY
+                ),
                 detail=(
                     "Offer expiry date cannot be "
                     "after joining date"
@@ -362,25 +414,60 @@ class OfferService:
             )
 
         # ----------------------------------------------
-        # Apply Updates
+        # Detect Real Changes
         # ----------------------------------------------
+
+        changed_fields = []
 
         for field, value in update_data.items():
 
-            if (
-                field == "currency"
-                and value is not None
-            ):
-                value = value.upper()
-
-            setattr(
+            old_value = getattr(
                 offer,
                 field,
-                value,
             )
 
-        db.commit()
-        db.refresh(offer)
+            if old_value != value:
+
+                setattr(
+                    offer,
+                    field,
+                    value,
+                )
+
+                changed_fields.append(field)
+
+        # No-op update
+        if not changed_fields:
+            return offer
+
+        try:
+
+            ActivityService.log_activity(
+                db=db,
+                activity_type=(
+                    "offer_details_updated"
+                ),
+                entity_type="offer",
+                entity_id=offer.id,
+                application_id=offer.application_id,
+                job_id=offer.job_id,
+                candidate_id=offer.candidate_id,
+                title="Offer details updated",
+                description=(
+                    "Updated offer fields: "
+                    + ", ".join(changed_fields)
+                    + "."
+                ),
+                commit=False,
+            )
+
+            db.commit()
+            db.refresh(offer)
+
+        except Exception:
+
+            db.rollback()
+            raise
 
         return offer
 
@@ -404,7 +491,7 @@ class OfferService:
         new_status = data.status
 
         # ----------------------------------------------
-        # Same status = return current state
+        # Same Status = No-op
         # ----------------------------------------------
 
         if current_status == new_status:
@@ -450,6 +537,14 @@ class OfferService:
             )
 
         # ----------------------------------------------
+        # Capture Application State
+        # ----------------------------------------------
+
+        old_application_status = (
+            application.status
+        )
+
+        # ----------------------------------------------
         # Apply Offer Status
         # ----------------------------------------------
 
@@ -458,35 +553,106 @@ class OfferService:
         # ----------------------------------------------
         # Synchronize Application
         # ----------------------------------------------
-        #
-        # accepted:
-        # Application stays selected.
-        #
-        # rejected:
-        # Candidate explicitly rejected the offer.
-        # Application becomes rejected.
-        #
-        # withdrawn / expired:
-        # We preserve the selected application state.
-        # This avoids incorrectly treating an expired
-        # recruiter offer as candidate rejection.
-        # ----------------------------------------------
 
         if new_status == "accepted":
+
             application.status = "selected"
 
         elif new_status == "rejected":
+
             application.status = "rejected"
             application.shortlisted = False
 
+        new_application_status = (
+            application.status
+        )
+
+        application_status_changed = (
+            old_application_status
+            != new_application_status
+        )
+
         # ----------------------------------------------
-        # Commit Atomically
+        # Resolve Offer Activity Type
         # ----------------------------------------------
 
-        db.commit()
+        activity_type = (
+            OfferService.STATUS_ACTIVITY_TYPES.get(
+                new_status,
+                "offer_status_changed",
+            )
+        )
 
-        db.refresh(offer)
-        db.refresh(application)
+        try:
+
+            # ------------------------------------------
+            # Offer Status Activity
+            # ------------------------------------------
+
+            ActivityService.log_activity(
+                db=db,
+                activity_type=activity_type,
+                entity_type="offer",
+                entity_id=offer.id,
+                application_id=offer.application_id,
+                job_id=offer.job_id,
+                candidate_id=offer.candidate_id,
+                title="Offer status changed",
+                description=(
+                    f"Offer status changed from "
+                    f"{current_status} to "
+                    f"{new_status}."
+                ),
+                old_status=current_status,
+                new_status=new_status,
+                commit=False,
+            )
+
+            # ------------------------------------------
+            # Application Status Activity
+            # ------------------------------------------
+            #
+            # Only generated if the offer transition
+            # actually changes the application state.
+            # ------------------------------------------
+
+            if application_status_changed:
+
+                ActivityService.log_activity(
+                    db=db,
+                    activity_type=(
+                        "application_status_changed"
+                    ),
+                    entity_type="application",
+                    entity_id=application.id,
+                    application_id=application.id,
+                    job_id=application.job_id,
+                    candidate_id=application.candidate_id,
+                    title="Application status changed",
+                    description=(
+                        "Application status changed "
+                        f"from {old_application_status} "
+                        f"to {new_application_status} "
+                        "after offer status update."
+                    ),
+                    old_status=old_application_status,
+                    new_status=(
+                        new_application_status
+                    ),
+                    commit=False,
+                )
+
+            # Offer + application + activities
+            # commit together.
+            db.commit()
+
+            db.refresh(offer)
+            db.refresh(application)
+
+        except Exception:
+
+            db.rollback()
+            raise
 
         return offer
 
@@ -506,7 +672,7 @@ class OfferService:
         )
 
         # ----------------------------------------------
-        # Do not delete finalized offers
+        # Do Not Delete Finalized Offers
         # ----------------------------------------------
 
         if offer.status in {
@@ -521,10 +687,62 @@ class OfferService:
                 ),
             )
 
-        db.delete(offer)
-        db.commit()
+        # ----------------------------------------------
+        # Preserve Historical Values
+        # ----------------------------------------------
+
+        deleted_offer_id = offer.id
+
+        application_id = (
+            offer.application_id
+        )
+
+        job_id = offer.job_id
+        candidate_id = offer.candidate_id
+
+        old_status = offer.status
+
+        offered_role = offer.offered_role
+
+        try:
+
+            # ------------------------------------------
+            # Audit Before Delete
+            # ------------------------------------------
+            #
+            # Activity has no FK to Offer through
+            # entity_id, so the historical offer ID
+            # remains safe after deletion.
+            # ------------------------------------------
+
+            ActivityService.log_activity(
+                db=db,
+                activity_type="offer_deleted",
+                entity_type="offer",
+                entity_id=deleted_offer_id,
+                application_id=application_id,
+                job_id=job_id,
+                candidate_id=candidate_id,
+                title="Offer deleted",
+                description=(
+                    f"Offer for {offered_role} "
+                    f"was deleted."
+                ),
+                old_status=old_status,
+                new_status=None,
+                commit=False,
+            )
+
+            db.delete(offer)
+
+            db.commit()
+
+        except Exception:
+
+            db.rollback()
+            raise
 
         return {
             "message": "Offer deleted successfully",
-            "offer_id": offer_id,
+            "offer_id": deleted_offer_id,
         }

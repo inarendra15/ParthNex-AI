@@ -10,53 +10,92 @@ from app.schemas.user import UserCreate
 
 class UserService:
 
+    # ==================================================
+    # REGISTER USER
+    # ==================================================
+
     @staticmethod
-    def register(db: Session, request: UserCreate):
+    def register(
+        db: Session,
+        request: UserCreate,
+    ):
+
+        # ----------------------------------------------
+        # Prevent Duplicate Email
+        # ----------------------------------------------
 
         existing = UserRepository.get_by_email(
             db,
-            request.email
+            request.email,
         )
 
         if existing:
             raise HTTPException(
                 status_code=400,
-                detail="Email already exists"
+                detail="Email already exists",
             )
+
+        # ----------------------------------------------
+        # Create User
+        # ----------------------------------------------
 
         user = User(
             full_name=request.full_name,
             email=request.email,
-            password=Hash.bcrypt(request.password)
+            password=Hash.bcrypt(
+                request.password
+            ),
+            role=request.role,
         )
 
-        return UserRepository.create(db, user)
+        return UserRepository.create(
+            db,
+            user,
+        )
+
+    # ==================================================
+    # LOGIN
+    # ==================================================
 
     @staticmethod
-    def login(db: Session, email: str, password: str):
+    def login(
+        db: Session,
+        email: str,
+        password: str,
+    ):
 
-        user = UserRepository.get_by_email(db, email)
+        user = UserRepository.get_by_email(
+            db,
+            email,
+        )
 
         if not user:
             raise HTTPException(
                 status_code=401,
-                detail="Invalid credentials"
+                detail="Invalid credentials",
             )
 
-        if not Hash.verify(user.password, password):
+        if not Hash.verify(
+            user.password,
+            password,
+        ):
             raise HTTPException(
                 status_code=401,
-                detail="Invalid credentials"
+                detail="Invalid credentials",
             )
+
+        # ----------------------------------------------
+        # Create JWT
+        # ----------------------------------------------
 
         token = JWTManager.create_access_token(
             {
                 "sub": user.email,
-                "role": user.role
+                "role": user.role,
             }
         )
 
         return {
             "access_token": token,
-            "token_type": "bearer"
+            "token_type": "bearer",
         }
