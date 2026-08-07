@@ -27,6 +27,7 @@ from app.models.application import Application
 # ======================================================
 
 from app.services.job_matching_service import JobMatchingService
+from app.services.activity_service import ActivityService
 
 
 # ======================================================
@@ -55,7 +56,7 @@ class RankingService:
     ):
 
         # ==================================================
-        # 1. RETRIEVE MATCHING CANDIDATES
+        # 1. RETRIEVE MATCHING RESUMES / CANDIDATES
         # ==================================================
 
         matched_candidates = (
@@ -69,7 +70,7 @@ class RankingService:
         enriched_candidates = []
 
         # ==================================================
-        # 2. ENRICH EACH CANDIDATE
+        # 2. ENRICH EACH RESUME RESULT
         # ==================================================
 
         for candidate in matched_candidates:
@@ -99,14 +100,15 @@ class RankingService:
             except Exception as e:
 
                 print(
-                    f"Ranking parse failed for "
-                    f"resume {resume.id}: {e}"
+                    "Resume parsing failed:",
+                    resume.id,
+                    e
                 )
 
                 continue
 
             # ----------------------------------------------
-            # Section Analysis
+            # Resume Section Analysis
             # ----------------------------------------------
 
             section_result = (
@@ -126,7 +128,7 @@ class RankingService:
             )
 
             # ----------------------------------------------
-            # Quality Analysis
+            # Resume Quality Analysis
             # ----------------------------------------------
 
             quality_result = (
@@ -136,37 +138,29 @@ class RankingService:
             )
 
             # ----------------------------------------------
-            # Add Phase 7 Scores
+            # Add AI Analysis Scores
             # ----------------------------------------------
 
-            enriched_candidate = (
-                candidate.copy()
+            candidate["section_score"] = (
+                section_result["section_score"]
             )
 
-            enriched_candidate[
-                "section_score"
-            ] = section_result[
-                "section_score"
-            ]
+            candidate["experience_score"] = (
+                experience_result[
+                    "experience_score"
+                ]
+            )
 
-            enriched_candidate[
-                "experience_score"
-            ] = experience_result[
-                "experience_score"
-            ]
-
-            enriched_candidate[
-                "quality_score"
-            ] = quality_result[
-                "quality_score"
-            ]
+            candidate["quality_score"] = (
+                quality_result["quality_score"]
+            )
 
             enriched_candidates.append(
-                enriched_candidate
+                candidate
             )
 
         # ==================================================
-        # 3. MULTI-FACTOR RANKING
+        # 3. RANK ALL RESUME RESULTS
         # ==================================================
 
         ranked_candidates = (
@@ -176,14 +170,24 @@ class RankingService:
         )
 
         # ==================================================
-        # 4. DEDUPLICATE CANDIDATES
+        # 4. DEDUPLICATE BY CANDIDATE
+        # ==================================================
         #
-        # Keep only the highest-ranked resume
-        # for each candidate.
+        # One candidate may have multiple resumes stored
+        # and indexed in FAISS.
+        #
+        # FAISS correctly works at resume level, but the
+        # ATS ranking must work at candidate level.
+        #
+        # CandidateRanker returns results ordered by final
+        # ranking_score from highest to lowest.
+        #
+        # Therefore the first occurrence of candidate_id
+        # represents that candidate's best-performing
+        # resume for this particular job.
         # ==================================================
 
         unique_candidates = []
-
         seen_candidate_ids = set()
 
         for candidate in ranked_candidates:
@@ -192,8 +196,16 @@ class RankingService:
                 candidate["candidate_id"]
             )
 
+            # ----------------------------------------------
+            # Candidate Already Represented
+            # ----------------------------------------------
+
             if candidate_id in seen_candidate_ids:
                 continue
+
+            # ----------------------------------------------
+            # Keep Candidate's Best Ranked Resume
+            # ----------------------------------------------
 
             seen_candidate_ids.add(
                 candidate_id
@@ -204,22 +216,27 @@ class RankingService:
             )
 
         # ----------------------------------------------
-        # Reassign ranks after deduplication
+        # From this point onward the pipeline operates
+        # on unique candidates rather than resumes.
         # ----------------------------------------------
-
-        for index, candidate in enumerate(
-            unique_candidates,
-            start=1
-        ):
-
-            candidate["rank"] = index
 
         ranked_candidates = (
             unique_candidates
         )
 
+         # ==================================================
+        # 5. ADD FINAL CANDIDATE RANK
         # ==================================================
-        # 5. AUTOMATIC SHORTLISTING
+
+        for index, candidate in enumerate(
+            ranked_candidates,
+            start=1
+        ):
+
+            candidate["rank"] = index
+
+        # ==================================================
+        # 6. SHORTLIST UNIQUE CANDIDATES
         # ==================================================
 
         shortlist_result = (
@@ -230,18 +247,13 @@ class RankingService:
         )
 
         # ==================================================
-        # 6. PERSIST AI RESULTS INTO APPLICATIONS
-        #
-        # This runs only when a stored job_id is supplied.
-        #
-        # Manual /ranking/candidates calls will continue
-        # working without changing application records.
+        # 7. PERSIST AI RESULTS TO APPLICATIONS
         # ==================================================
 
         if job_id is not None:
 
             # ----------------------------------------------
-            # Candidate IDs shortlisted by AI
+            # Candidate IDs Shortlisted By AI
             # ----------------------------------------------
 
             shortlisted_candidate_ids = {
@@ -251,7 +263,7 @@ class RankingService:
             }
 
             # ----------------------------------------------
-            # Update corresponding applications
+            # Update Corresponding Applications
             # ----------------------------------------------
 
             for candidate in ranked_candidates:
@@ -278,7 +290,31 @@ class RankingService:
                     continue
 
                 # ------------------------------------------
-                # Determine shortlist decision
+                # Capture State Before AI Update
+                # ------------------------------------------
+
+                old_ranking_score = (
+                    application.ranking_score
+                )
+
+                old_semantic_score = (
+                    application.semantic_score
+                )
+
+                old_skill_score = (
+                    application.skill_score
+                )
+
+                old_shortlisted = (
+                    application.shortlisted
+                )
+
+                old_status = (
+                    application.status
+                )
+
+                # ------------------------------------------
+                # Determine Shortlist Decision
                 # ------------------------------------------
 
                 is_shortlisted = (
@@ -321,7 +357,7 @@ class RankingService:
                 if application.status in {
                     "applied",
                     "screened",
-                    "shortlisted"
+                    "shortlisted",
                 }:
 
                     if is_shortlisted:
@@ -336,74 +372,184 @@ class RankingService:
                             "screened"
                         )
 
+                # ------------------------------------------
+                # Detect Material AI Changes
+                # ------------------------------------------
+
+                scores_changed = (
+                    old_ranking_score
+                    != application.ranking_score
+
+                    or old_semantic_score
+                    != application.semantic_score
+
+                    or old_skill_score
+                    != application.skill_score
+
+                    or old_shortlisted
+                    != application.shortlisted
+                )
+
+                status_changed = (
+                    old_status
+                    != application.status
+                )
+
+                # ------------------------------------------
+                # Audit AI Ranking Update
+                # ------------------------------------------
+                #
+                # An activity is generated only when
+                # something actually changed.
+                #
+                # Identical reranking therefore does not
+                # create duplicate/noise audit records.
+                # ------------------------------------------
+
+                if scores_changed or status_changed:
+
+                    changed_fields = []
+
+                    if (
+                        old_ranking_score
+                        != application.ranking_score
+                    ):
+
+                        changed_fields.append(
+                            "ranking_score"
+                        )
+
+                    if (
+                        old_semantic_score
+                        != application.semantic_score
+                    ):
+
+                        changed_fields.append(
+                            "semantic_score"
+                        )
+
+                    if (
+                        old_skill_score
+                        != application.skill_score
+                    ):
+
+                        changed_fields.append(
+                            "skill_score"
+                        )
+
+                    if (
+                        old_shortlisted
+                        != application.shortlisted
+                    ):
+
+                        changed_fields.append(
+                            "shortlisted"
+                        )
+
+                    # --------------------------------------
+                    # Build Audit Description
+                    # --------------------------------------
+
+                    if changed_fields:
+
+                        description = (
+                            "AI ranking updated: "
+                            + ", ".join(
+                                changed_fields
+                            )
+                            + "."
+                        )
+
+                    else:
+
+                        description = (
+                            "AI ranking updated."
+                        )
+
+                    if status_changed:
+
+                        description += (
+                            f" Application status changed "
+                            f"from {old_status} "
+                            f"to {application.status}."
+                        )
+
+                    # --------------------------------------
+                    # Log Activity
+                    # --------------------------------------
+                    #
+                    # commit=False is intentional.
+                    #
+                    # Application updates and activity
+                    # records will be committed together
+                    # as one transaction below.
+                    # --------------------------------------
+
+                    ActivityService.log_activity(
+                        db=db,
+
+                        activity_type=(
+                            "application_scores_updated"
+                        ),
+
+                        entity_type="application",
+
+                        entity_id=application.id,
+
+                        application_id=(
+                            application.id
+                        ),
+
+                        job_id=(
+                            application.job_id
+                        ),
+
+                        candidate_id=(
+                            application.candidate_id
+                        ),
+
+                        title=(
+                            "Application AI scores updated"
+                        ),
+
+                        description=description,
+
+                        old_status=(
+                            old_status
+                            if status_changed
+                            else None
+                        ),
+
+                        new_status=(
+                            application.status
+                            if status_changed
+                            else None
+                        ),
+
+                        commit=False,
+                    )
+
             # ----------------------------------------------
-            # Commit all application updates together
+            # Commit Application + Audit Updates Together
             # ----------------------------------------------
 
             db.commit()
 
         # ==================================================
-        # 7. FINAL RESPONSE
+        # 8. FINAL RESPONSE
         # ==================================================
 
         return {
-
-            "job_description": (
-                job_description
+            "total_candidates": len(
+                ranked_candidates
             ),
 
-            "top_k": top_k,
-
-            "ranking_weights": {
-
-                "semantic": (
-                    CandidateRanker
-                    .SEMANTIC_WEIGHT
-                ),
-
-                "skills": (
-                    CandidateRanker
-                    .SKILL_WEIGHT
-                ),
-
-                "experience": (
-                    CandidateRanker
-                    .EXPERIENCE_WEIGHT
-                ),
-
-                "quality": (
-                    CandidateRanker
-                    .QUALITY_WEIGHT
-                ),
-
-                "sections": (
-                    CandidateRanker
-                    .SECTION_WEIGHT
-                )
-            },
-
-            "threshold": (
-                shortlist_result[
-                    "threshold"
-                ]
+            "shortlisted_count": len(
+                shortlist_result["shortlisted"]
             ),
 
-            "total_candidates": (
-                shortlist_result[
-                    "total_candidates"
-                ]
-            ),
-
-            "shortlisted_count": (
-                shortlist_result[
-                    "shortlisted_count"
-                ]
-            ),
-
-            "not_shortlisted_count": (
-                shortlist_result[
-                    "not_shortlisted_count"
-                ]
+            "not_shortlisted_count": len(
+                shortlist_result["not_shortlisted"]
             ),
 
             "ranked_candidates": (
@@ -411,14 +557,12 @@ class RankingService:
             ),
 
             "shortlisted": (
-                shortlist_result[
-                    "shortlisted"
-                ]
+                shortlist_result["shortlisted"]
             ),
 
             "not_shortlisted": (
                 shortlist_result[
                     "not_shortlisted"
                 ]
-            )
+            ),
         }
